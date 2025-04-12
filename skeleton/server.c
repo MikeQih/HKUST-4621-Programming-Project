@@ -9,7 +9,8 @@
 #include <poll.h>
 
 #define SERVER "127.0.0.1"
-#define SERVER_PORT 5000
+// #define SERVER_PORT 5000
+#define SERVER_PORT 8080
 
 #define MAXMSG 1400
 #define MAXNAME 20
@@ -493,7 +494,8 @@ void* chat_server(void* arguments) {
 		exit(EXIT_FAILURE);
 	}
 
-	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+	// if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
 		perror("setsockopt error");
 		exit(EXIT_FAILURE);
 	}
