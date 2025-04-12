@@ -1,0 +1,4 @@
+6001
+REGISTER client1 Y N
+QUERY 20.txt
+GET 127.0.0.1 6002

@@ -1,0 +1,25 @@
+REGISTER A (both), B (file), C (both), and D (chat).
+A @ ALL (C, D): I have 00.txt.
+C @ A: I'll ask for it later.
+B QUERY 00.txt and GET it from A. (00.txt, 31.txt)
+B tries @ ALL (A, C, D) but fails.
+B UPDATE to enable chatting.
+B @ ALL (A, C, D): I've got 00.txt and I have 31.txt as well.
+A UPDATE to disable file sharing.
+A @ ALL (B, C, D): Please ask B to get it from now.
+C UPDATE to disable chatting.
+D calls WHO (A, B) but @ C: Are you still there? C gets nothing.
+D UPDATE to enable file sharing.
+D QUERY 00.txt finds only B.
+D QUERY 31.txt and GET it from B. (31.txt)
+B EXIT.
+D @ A: I got 31.txt, you can get it from me.
+A QUERY but fails.
+C @ A but fails.
+C UPDATE to enable chatting.
+C QUERY 00.txt and finds none.
+C @ A: I'm asking for 00.txt from you, can you share it with me now?
+A @ C: Ok, let me enable the file sharing service again first.
+A UPDATE to enable file sharing.
+C QUERY 00.txt and GET it from A. (00.txt)
+A QUERY 31.txt and finds only D, then GET it from D. (00.txt, 31.txt)

@@ -1,0 +1,2 @@
+6002
+REGISTER client2 Y N

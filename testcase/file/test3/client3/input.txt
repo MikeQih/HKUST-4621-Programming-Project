@@ -1,0 +1,4 @@
+6003
+REGISTER client3 Y N
+QUERY 22.txt
+GET 127.0.0.1 6002
