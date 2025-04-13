@@ -386,7 +386,20 @@ struct node* send_return(int sockfd, struct sockaddr_in cltaddr, char file_idx, 
 	 * START YOUR CODE HERE
 	 **********************************************/
 
+	 // 从当前节点开始搜索
+	while (current != NULL) {
+		// 检查节点是否启用文件共享且拥有请求的文件
+		if ((current->register_flag & FILE_FLAG) && 
+			(current->file_map & (1U << (31 - file_idx)))) {
+			// 找到匹配的节点，准备发送响应
+			break;
+		}
+		current = current->next;
+    }
 
+	if (current == NULL) {
+        return NULL; // 没有节点有这个文件
+    }
 
 	/***********************************************
 	 * END OF YOUR CODE
