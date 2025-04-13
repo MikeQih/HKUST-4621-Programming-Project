@@ -114,11 +114,35 @@ int rdt3_send(int sockfd, struct sockaddr_in servaddr, char ack_num, char *buffe
 		 **********************************************/
 
 
+		// 接收回复
+		int n = recvfrom(sockfd, recv_buf, MAXMSG, 0, 
+		(struct sockaddr *)&recv_addr, &recv_len);
+
+		// 如果接收超时或出错，重新发送数据包
+		if (n < 0) {
+		sendto(sockfd, buffer, len, 0, 
+			(const struct sockaddr *)&servaddr, sizeof(servaddr));
+		continue;
+		}
+
+		// 确保接收的数据以NULL结尾
+		recv_buf[n] = '\0';
+
+		// 解析序列号和ACK
+		seq = recv_buf[0];
+		return_code = recv_buf[1]; // 获取返回码
+
+		// 检查ACK包
+		if (seq == ack_num && strncmp(recv_buf + 2, ACK, strlen(ACK)) == 0) {
+		// 收到了正确的ACK
+		waiting = 0;
+		}
 
 		/***********************************************
 		 * END OF YOUR CODE
 		 **********************************************/
 		bzero(recv_buf, MAXMSG);
+		
 	}
 
 	unset_timeout(sockfd);

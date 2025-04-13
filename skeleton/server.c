@@ -174,7 +174,22 @@ void collect_names_in_chatting(struct node *head, int index, char* names) {
 	 *
 	 * START YOUR CODE HERE
 	 **********************************************/
-
+	struct node *current = head;
+	int idx = 0;
+	while (current != NULL) {
+        // 如果节点启用了聊天功能，并且不是当前用户
+        if ((current->register_flag & CHAT_FLAG) && idx != index) {
+            strcat(names, "'");
+            strcat(names, current->name);
+            strcat(names, "' ");
+			/*
+			对于每个节点，如果用户注册时启用了聊天功能（通过 CHAT_FLAG 标记）且该节点的索引不等于传入的 index（即排除当前用户），
+			则将这个用户的名字追加到字符串 names 中，并用单引号括起来，名字之间用空格分隔。
+			*/
+        }
+        current = current->next;
+        idx++;
+    }
 
 
 	/***********************************************
@@ -191,9 +206,21 @@ int query_idx_flag_by_name(struct node *head, const char* name, int* index, char
 	 *
 	 * START YOUR CODE HERE
 	 **********************************************/
-
-
-
+	struct node *current = head;
+    int idx = 0;
+	while (current != NULL)
+	{
+		if (strcmp(current->name,name) == 0)
+		{
+			*index = idx;
+			*flag = current->register_flag;
+			return 0;
+		}
+		current = current->next;
+		idx++;
+	}
+	return -1;
+	
 	/***********************************************
 	 * END OF YOUR CODE
 	 **********************************************/
@@ -208,8 +235,22 @@ int query_name_flag_by_idx(struct node *head, int index, char* name, char* flag)
 	 *
 	 * START YOUR CODE HERE
 	 **********************************************/
+	struct node *current = head;
+    int idx = 0;
+	while (current != NULL && idx<index)
+	{
+		current = current -> next;
+		idx++;
+	}
 
-
+	if (current == NULL)
+	{
+		return -1;
+	}
+	
+	strcpy(name, current->name); //把 current->name 里的字符串 复制到 name 这个变量中。
+    *flag = current->register_flag;
+    return 0; // 成功
 
 	/***********************************************
 	 * END OF YOUR CODE
@@ -223,14 +264,14 @@ void remove_node(struct node** head, int index) {
         return;
     }
 
-	if (index == 0) {
+	if (index == 0) { //index is 头节点
 		struct node* next = (*head)->next;
 		free(*head);
 		*head = next;
 		return;
 	}
 
-    struct node* prev = *head;
+    struct node* prev = *head; //定义一个指针 prev 指向当前头节点，准备遍历链表找目标节点。
 	struct node* curr = (*head)->next;
 	int idx = 1;
     while (curr != NULL) {
@@ -521,7 +562,9 @@ void* chat_server(void* arguments) {
 	 *
 	 * START YOUR CODE HERE
 	 **********************************************/
-
+	pfds[0].fd = server_fd;
+	pfds[0].events = POLLIN;
+	fd_count = 1;
 
 
 	/***********************************************
@@ -544,7 +587,13 @@ void* chat_server(void* arguments) {
 					 *
 					 * START YOUR CODE HERE
 					 **********************************************/
-
+					if ((client_fd = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen))<0)
+					{
+						perror("accept");
+    					continue;
+					}
+					printf("New connection accepted\n");
+					add_to_pfds(&pfds, client_fd, &fd_count, &fd_size);
 
 
 					/***********************************************
@@ -623,7 +672,14 @@ void* chat_server(void* arguments) {
 							 * START YOUR CODE HERE
 							 **********************************************/
 
-
+							// 处理@ALL:消息
+							for (int j = 1; j < fd_count; j++) { // 从1开始跳过服务器socket
+								if (j != i) { // 不发给发送者自己
+									if (send(pfds[j].fd, msg, MAXMSG, 0) < 0) {
+										perror("send");
+									}
+								}
+							}
 
 							/***********************************************
 							 * END OF YOUR CODE
@@ -729,7 +785,14 @@ void* chat_server(void* arguments) {
 							 * START YOUR CODE HERE
 							 **********************************************/
 
-
+							// 处理离开和加入消息
+							for (int j = 1; j < fd_count; j++) { // 从1开始跳过服务器socket
+								if (j != i) { // 不发给发送者自己
+									if (send(pfds[j].fd, msg, MAXMSG, 0) < 0) {
+										perror("send");
+									}
+								}
+							}
 
 							/***********************************************
 							 * END OF YOUR CODE
