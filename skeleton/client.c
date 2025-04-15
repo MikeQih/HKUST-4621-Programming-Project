@@ -41,7 +41,7 @@
 #define GOODBYE "GOODBYE"
 
 #define TIMEOUT 500000		/* 1000 ms */
-
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 
 /* This structure can be used to pass arguments */
@@ -489,7 +489,9 @@ void* p2p_server(void* arg) {
 	 * START YOUR CODE HERE
 	 **********************************************/
 
-
+	pfds[0].fd = server_fd;
+	pfds[0].events = POLLIN;
+	fd_count = 1;
 
 	/***********************************************
 	 * END OF YOUR CODE
@@ -514,8 +516,13 @@ void* p2p_server(void* arg) {
 					 * START YOUR CODE HERE
 					 **********************************************/
 
-
-
+					if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) {
+						perror("accept");
+						continue;
+					}
+					printf("P2P server: new connection accepted\n");
+					add_to_pfds(&pfds, new_socket, &fd_count, &fd_size);
+					
 					/***********************************************
 					 * END OF YOUR CODE
 					 **********************************************/
@@ -552,7 +559,27 @@ void* p2p_server(void* arg) {
 					 * START YOUR CODE HERE
 					 **********************************************/
 
+					printf("File size to send: %ld bytes\n", file_size);
+					if (send(new_socket, &file_size, sizeof(file_size), 0) < 0) {
+						perror("send file size failed");
+						fclose(fp);
+						close(new_socket);
+						del_from_pfds(pfds, i, &fd_count);
+						continue;
+					}
 
+					rewind(fp); // 确保文件指针在开头
+					// 然后分块发送文件内容
+					while ((bytes_read = fread(buffer, 1, MAXMSG, fp)) > 0) {
+						printf("Sending %ld bytes of file data\n", bytes_read);
+						if (send(new_socket, buffer, bytes_read, 0) < 0) {
+							perror("send file content failed");
+							break;
+						}
+						bzero(buffer, MAXMSG);
+					}
+
+					printf("File sent successfully\n");
 
 					/***********************************************
 					 * END OF YOUR CODE
@@ -597,6 +624,7 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
     // Connect to server
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("connect error");
+		close(sock);
         return -1;
     }
 
@@ -605,15 +633,16 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
     // Send file name to server
     if (send(sock, file_name, strlen(file_name), 0) < 0) {
         perror("send file name error");
+		close(sock);
         return -1;
     }
 
-    // Receive file contents from server
-    fp = fopen(file_name, "wb");
-    if (fp == NULL) {
-        perror("fopen file error");
-        return -1;
-    }
+    // // Receive file contents from server
+    // fp = fopen(file_name, "wb");
+    // if (fp == NULL) {
+    //     perror("fopen file error");
+    //     return -1;
+    // }
 
 	/***********************************************
 	 * Refer to the description of file transfer
@@ -622,7 +651,51 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
 	 * START YOUR CODE HERE
 	 **********************************************/
 
+	// 接收文件大小
+	long file_size;
+	if (recv(sock, &file_size, sizeof(file_size), 0) < 0) {
+		perror("recv file size failed");
+		fclose(fp);
+		close(sock);
+		return -1;
+	}
 
+	printf("File size to receive: %ld bytes\n", file_size);
+
+	// 接收并写入文件内容
+	if (file_size > 0) {
+		fp = fopen(file_name, "wb");
+		if (fp == NULL) {
+			perror("fopen file error");
+			close(sock);
+			return -1;
+		}
+
+		long total_received = 0;
+		while (total_received < file_size) {
+			bzero(buffer, MAXMSG);
+			bytes_read = recv(sock, buffer, MIN(MAXMSG, file_size - total_received), 0);
+			
+			if (bytes_read <= 0) {
+				if (bytes_read == 0)
+					printf("Connection closed by peer\n");
+				else
+					perror("recv file content failed");
+				break;
+			}
+			
+			printf("Received %ld bytes of file data\n", bytes_read);
+            size_t written = fwrite(buffer, 1, bytes_read, fp);
+            if (written != bytes_read) {
+                printf("Warning: Only wrote %ld of %ld bytes\n", written, bytes_read);
+            }
+            total_received += bytes_read;
+		}
+		printf("File received: %ld of %ld bytes\n", total_received, file_size);
+        fclose(fp);
+	} else {
+		printf("No file content to receive (file size is 0)\n");
+	}
 
 	/***********************************************
 	 * END OF YOUR CODE
@@ -694,8 +767,12 @@ int main() {
 	 * START YOUR CODE HERE
 	 **********************************************/
 
-
-
+	if (pthread_create(&tid, NULL, p2p_server, (void*)&arg) != 0) {
+		perror("pthread_create failed");
+		exit(EXIT_FAILURE);
+	}
+	printf("P2P server thread created successfully\n");
+	 
 	/***********************************************
 	 * END OF YOUR CODE
 	 **********************************************/
