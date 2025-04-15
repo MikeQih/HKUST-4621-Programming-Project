@@ -967,8 +967,22 @@ int main() {
 			 *
 			 * START YOUR CODE HERE
 			 **********************************************/
+			parse_idx += strlen(UPDATE);
+			parse_idx++; /*skip blank */
 
+			memcpy(&dst_ip, buffer + parse_idx, sizeof(dst_ip));
+			parse_idx += sizeof(dst_ip);
 
+			memcpy(&dst_port, buffer + parse_idx, sizeof(dst_port));
+			parse_idx += sizeof(dst_port);
+
+			memcpy(&new_map, buffer + parse_idx, sizeof(new_map));
+			parse_idx += sizeof(new_map);
+
+			memcpy(&updated_flag, buffer + parse_idx, sizeof(updated_flag));
+			parse_idx += sizeof(updated_flag);
+
+			printf("Update '%s' @ (%d %hd) with flag %d\n", "unknown", dst_ip, dst_port, updated_flag);
 
 			/***********************************************
 			 * END OF YOUR CODE
@@ -986,7 +1000,21 @@ int main() {
 				 * START YOUR CODE HERE
 				 **********************************************/
 
-
+				// 更新节点信息
+				update_node->file_map = new_map;
+				update_node->register_flag = updated_flag;
+				printf("Updated node: '%s' with file_map 0x%x and flag %d\n", 
+					update_node->name, update_node->file_map, update_node->register_flag);
+		
+				// 发送ACK包
+				memcpy(send_buf, &seq, sizeof(seq));
+				send_idx += 2; /* seq and blank */
+		
+				memcpy(send_buf + send_idx, ACK, strlen(ACK));
+				send_idx += strlen(ACK);
+		
+				sendto(sockfd, (const char *)send_buf, send_idx,
+					0, (const struct sockaddr *) &clientaddr, sizeof(clientaddr));
 
 				/***********************************************
 				 * END OF YOUR CODE

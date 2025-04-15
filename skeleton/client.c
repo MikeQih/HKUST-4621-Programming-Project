@@ -142,7 +142,7 @@ int rdt3_send(int sockfd, struct sockaddr_in servaddr, char ack_num, char *buffe
 		 * END OF YOUR CODE
 		 **********************************************/
 		bzero(recv_buf, MAXMSG);
-		
+
 	}
 
 	unset_timeout(sockfd);
@@ -216,7 +216,35 @@ int send_update(int sockfd, struct sockaddr_in servaddr, unsigned int ip, unsign
 	 * START YOUR CODE HERE
 	 **********************************************/
 
+	int total_len = 0;
 
+	memcpy(buffer, &seq, sizeof(seq));
+	total_len ++; /* add a seq */
+
+	buffer[total_len] = ' ';
+	total_len ++; /* add a blank */
+
+	memcpy(buffer + total_len, UPDATE, strlen(UPDATE));
+	total_len += strlen(UPDATE);
+
+	buffer[total_len] = ' ';
+	total_len ++; /* add a blank */
+
+	memcpy(buffer + total_len, &ip, sizeof(ip));
+	total_len += sizeof(ip);
+
+	memcpy(buffer + total_len, &port, sizeof(port));
+	total_len += sizeof(port);
+
+	memcpy(buffer + total_len, &file_map, sizeof(file_map));
+	total_len += sizeof(file_map);
+
+	memcpy(buffer + total_len, &updated_flag, sizeof(updated_flag));
+	total_len += sizeof(updated_flag);
+
+	buffer[total_len] = '\0';
+	
+	int return_code = rdt3_send(sockfd, servaddr, seq, buffer, total_len);
 
 	/***********************************************
 	 * END OF YOUR CODE
