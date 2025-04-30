@@ -278,14 +278,14 @@ int receive_query(int sockfd, struct sockaddr_in servaddr) {
     char send_buf[MAXMSG];
     unsigned send_idx = 0;
 
-    // 移除超时设置，改为明确的超时逻辑
+    // 设置超时时间
     set_timeout(sockfd, TIMEOUT);
 
     printf("Receiving query ...\n");
 
     char unfinished = 1;
     int timeout_count = 0;
-    int max_timeouts = 20;  // 允许的最大超时次数
+    int max_timeouts = 30;  // 增加超时次数上限，确保足够的重试机会
     
     while (unfinished && timeout_count < max_timeouts) {
         bzero(buffer, MAXMSG);
@@ -313,10 +313,31 @@ int receive_query(int sockfd, struct sockaddr_in servaddr) {
         if (strncmp(buffer + parse_idx, FINISH, strlen(FINISH)) == 0) {
             unfinished = 0;
             printf("Received FINISH signal\n");
+            
+            // 发送ACK (确保服务器收到)
+            bzero(send_buf, MAXMSG);
+            send_idx = 0;
+            
+            memcpy(send_buf, &seq, sizeof(seq));
+            send_idx = 2; /* seq and blank */
+
+            memcpy(send_buf + send_idx, ACK, strlen(ACK));
+            send_idx += strlen(ACK);
+
+            // 多次发送ACK，增加成功率
+            for (int i = 0; i < 3; i++) {
+                if (sendto(sockfd, send_buf, send_idx, 0, 
+                          (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+                    perror("sendto ACK failed");
+                } else {
+                    printf("Sent ACK for FINISH (attempt %d)\n", i+1);
+                }
+                usleep(10000); // 短暂延迟10ms
+            }
         }
         /* Receive RESPONSE */
         else if (strncmp(buffer + parse_idx, RESPONSE, strlen(RESPONSE)) == 0) {
-            // Receive and parse packet
+            // 处理RESPONSE包
             unsigned int ip;
             unsigned short port;
             char name[MAXNAME];
@@ -342,31 +363,31 @@ int receive_query(int sockfd, struct sockaddr_in servaddr) {
             } else {
                 printf("Received malformed RESPONSE packet\n");
             }
+            
+            // 发送ACK
+            bzero(send_buf, MAXMSG);
+            send_idx = 0;
+            
+            memcpy(send_buf, &seq, sizeof(seq));
+            send_idx = 2; /* seq and blank */
+
+            memcpy(send_buf + send_idx, ACK, strlen(ACK));
+            send_idx += strlen(ACK);
+
+            // 多次发送ACK，增加成功率
+            for (int i = 0; i < 3; i++) {
+                if (sendto(sockfd, send_buf, send_idx, 0, 
+                          (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+                    perror("sendto ACK failed");
+                } else {
+                    printf("Sent ACK for RESPONSE (attempt %d)\n", i+1);
+                }
+                usleep(10000); // 短暂延迟10ms
+            }
         } else {
             printf("Unknown operation: %s\n", buffer + 2);
             continue;
         }
-
-        // 无论如何都发送ACK
-        bzero(send_buf, MAXMSG);
-        send_idx = 0;
-        
-        memcpy(send_buf, &seq, sizeof(seq));
-        send_idx += 2; /* seq and blank */
-
-        memcpy(send_buf + send_idx, ACK, strlen(ACK));
-        send_idx += strlen(ACK);
-
-        if (sendto(sockfd, send_buf, send_idx, 0, 
-                  (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
-            perror("sendto ACK failed");
-        } else {
-            printf("Sent ACK for sequence %d\n", seq);
-        }
-        
-        bzero(send_buf, MAXMSG);
-        send_idx = 0;
-        parse_idx = 0;
     }
 
     if (timeout_count >= max_timeouts) {
@@ -376,6 +397,7 @@ int receive_query(int sockfd, struct sockaddr_in servaddr) {
 
     return 0;
 }
+
 
 /* Send query to the server */
 int send_query(int sockfd, struct sockaddr_in servaddr, char *filename, int len) {
@@ -643,7 +665,7 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
     FILE *fp = NULL;
     ssize_t bytes_read;
     int connection_attempts = 0;
-    int max_connection_attempts = 5;
+    int max_connection_attempts = 10;  // 增加连接尝试次数
 
     // 创建socket
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -660,7 +682,7 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
 
     // 设置连接超时
     struct timeval tv;
-    tv.tv_sec = 5;  // 5秒连接超时
+    tv.tv_sec = 10;  // 增加超时时间到10秒
     tv.tv_usec = 0;
     if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv) < 0) {
         perror("setsockopt SO_SNDTIMEO");
@@ -669,23 +691,24 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
     // 尝试连接服务器
     while (connection_attempts < max_connection_attempts) {
         if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-			perror("connect error");
-			connection_attempts++;
-			
-			if (connection_attempts >= max_connection_attempts) {
-				printf("Failed to connect after %d attempts\n", max_connection_attempts);
-				close(sock);
-				return -1;
-			}
-			
-			sleep(1); // 短暂延迟后重试
-			continue;
-		}
+            perror("connect error");
+            connection_attempts++;
+            
+            if (connection_attempts >= max_connection_attempts) {
+                printf("Failed to connect after %d attempts\n", max_connection_attempts);
+                close(sock);
+                return -1;
+            }
+            
+            sleep(1); // 短暂延迟后重试
+            continue;
+        }
+        printf("Connected to p2p server successfully\n");
         break; // 连接成功
     }
 
     // 设置接收超时
-    tv.tv_sec = 10;  // 10秒接收超时
+    tv.tv_sec = 15;  // 增加接收超时时间到15秒
     tv.tv_usec = 0;
     if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv) < 0) {
         perror("setsockopt SO_RCVTIMEO");
@@ -697,11 +720,12 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
         close(sock);
         return -1;
     }
+    printf("Sent filename: %s\n", file_name);
 
     // 接收文件大小
     long file_size;
     int recv_attempts = 0;
-    int max_recv_attempts = 10;
+    int max_recv_attempts = 15;  // 增加接收尝试次数
     
     while (recv_attempts < max_recv_attempts) {
         int result = recv(sock, &file_size, sizeof(file_size), 0);
@@ -733,95 +757,91 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
 
     printf("File size to receive: %ld bytes\n", file_size);
 
-    // 接收并写入文件内容
-    if (file_size > 0) {
-        fp = fopen(file_name, "wb");
-        if (fp == NULL) {
-            perror("fopen file error");
-            close(sock);
-            return -1;
-        }
-
-        long total_received = 0;
-        int chunk_attempts = 0;
-        int max_chunk_attempts = 20;
-        
-        while (total_received < file_size && chunk_attempts < max_chunk_attempts) {
-            bzero(buffer, MAXMSG);
-            bytes_read = recv(sock, buffer, MIN(MAXMSG, file_size - total_received), 0);
-            
-            if (bytes_read < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    printf("Timeout receiving file chunk, retrying (%d/%d)\n", 
-                           chunk_attempts+1, max_chunk_attempts);
-                    chunk_attempts++;
-                    continue;
-                } else {
-                    perror("recv file content failed");
-                    break;
-                }
-            } else if (bytes_read == 0) {
-                printf("Connection closed by peer\n");
-                break;
-            } else {
-                chunk_attempts = 0; // 成功接收，重置尝试计数
-                
-                printf("Received %ld bytes of file data\n", bytes_read);
-                size_t written = fwrite(buffer, 1, bytes_read, fp);
-                if (written != bytes_read) {
-                    printf("Warning: Only wrote %ld of %ld bytes\n", written, bytes_read);
-                    // 尝试再次写入未成功写入的部分
-                    size_t remaining = bytes_read - written;
-                    size_t additional = fwrite(buffer + written, 1, remaining, fp);
-                    written += additional;
-                    if (written != bytes_read) {
-                        printf("Error: Still couldn't write all data\n");
-                    }
-                }
-                total_received += bytes_read;
-                
-                // 刷新文件缓冲区，确保数据写入磁盘
-                fflush(fp);
-            }
-        }
-        
-        printf("File received: %ld of %ld bytes\n", total_received, file_size);
-        
-        if (total_received < file_size) {
-            printf("Warning: Incomplete file transfer\n");
-            if (chunk_attempts >= max_chunk_attempts) {
-                printf("Maximum retry attempts reached\n");
-            }
-        }
-        
-        fclose(fp);
-        
-        // 验证文件是否成功接收
-        fp = fopen(file_name, "rb");
-        if (fp == NULL) {
-            printf("Error: Cannot open received file for verification\n");
-            close(sock);
-            return -1;
-        }
-        
-        fseek(fp, 0, SEEK_END);
-        long actual_size = ftell(fp);
-        fclose(fp);
-        
-        if (actual_size != file_size) {
-            printf("Error: File size mismatch. Expected %ld, got %ld\n", 
-                   file_size, actual_size);
-            return -1;
-        }
-    } else {
-        printf("No file content to receive (file size is 0)\n");
+    // 创建文件
+    fp = fopen(file_name, "wb");
+    if (fp == NULL) {
+        perror("fopen file error");
+        close(sock);
+        return -1;
     }
 
-    printf("Receive finished !\n");
+    // 接收并写入文件内容
+    long total_received = 0;
+    int chunk_attempts = 0;
+    int max_chunk_attempts = 30;  // 增加块尝试次数
+    
+    while (total_received < file_size && chunk_attempts < max_chunk_attempts) {
+        bzero(buffer, MAXMSG);
+        bytes_read = recv(sock, buffer, MIN(MAXMSG, file_size - total_received), 0);
+        
+        if (bytes_read < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                printf("Timeout receiving file chunk, retrying (%d/%d)\n", 
+                       chunk_attempts+1, max_chunk_attempts);
+                chunk_attempts++;
+                continue;
+            } else {
+                perror("recv file content failed");
+                break;
+            }
+        } else if (bytes_read == 0) {
+            printf("Connection closed by peer\n");
+            break;
+        } else {
+            chunk_attempts = 0; // 成功接收，重置尝试计数
+            
+            printf("Received %ld bytes of file data\n", bytes_read);
+            size_t written = fwrite(buffer, 1, bytes_read, fp);
+            if (written != bytes_read) {
+                printf("Warning: Only wrote %ld of %ld bytes\n", written, bytes_read);
+                // 尝试再次写入未成功写入的部分
+                size_t remaining = bytes_read - written;
+                size_t additional = fwrite(buffer + written, 1, remaining, fp);
+                written += additional;
+                if (written != bytes_read) {
+                    printf("Error: Still couldn't write all data\n");
+                }
+            }
+            total_received += bytes_read;
+            
+            // 刷新文件缓冲区，确保数据写入磁盘
+            fflush(fp);
+        }
+    }
+    
+    printf("File received: %ld of %ld bytes\n", total_received, file_size);
+    
+    if (total_received < file_size) {
+        printf("Warning: Incomplete file transfer\n");
+        if (chunk_attempts >= max_chunk_attempts) {
+            printf("Maximum retry attempts reached\n");
+        }
+    }
+    
+    fclose(fp);
+    
+    // 验证文件是否成功接收
+    fp = fopen(file_name, "rb");
+    if (fp == NULL) {
+        printf("Error: Cannot open received file for verification\n");
+        close(sock);
+        return -1;
+    }
+    
+    fseek(fp, 0, SEEK_END);
+    long actual_size = ftell(fp);
+    fclose(fp);
+    
+    if (actual_size != file_size) {
+        printf("Error: File size mismatch. Expected %ld, got %ld\n", 
+               file_size, actual_size);
+        return -1;
+    }
+
+    printf("File received successfully!\n");
     close(sock);
     return 0;
 }
-
 // Routine for receving messages when chatting
 void* chat_recv(void* args) {
 	int chat_sockfd = *((int*)args);

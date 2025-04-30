@@ -373,7 +373,7 @@ void remove_ctx(struct rdt3_sender_ctx **head, int index) {
     }
 }
 
-/* Query the ip and port list */
+/* 改进的 send_return 函数 */
 struct node* send_return(int sockfd, struct sockaddr_in cltaddr, char file_idx, struct node* current, char seq) {
     // 从当前节点开始搜索
     while (current != NULL) {
@@ -393,7 +393,7 @@ struct node* send_return(int sockfd, struct sockaddr_in cltaddr, char file_idx, 
     char buffer[MAXMSG];
     bzero(buffer, MAXMSG);
 
-    /* Compose send buffer: REGISTER IP Port */
+    /* Compose send buffer: RESPONSE IP Port Name */
     int total_len = 0;
 
     memcpy(buffer, &seq, sizeof(seq));
@@ -421,13 +421,13 @@ struct node* send_return(int sockfd, struct sockaddr_in cltaddr, char file_idx, 
 
     // 增加重传次数，确保消息得到传递
     int sent = 0;
-    int max_retries = 3;
+    int max_retries = 5;  // 增加重试次数
     for (int i = 0; i < max_retries && !sent; i++) {
         if (sendto(sockfd, (const char *)buffer, total_len,
             0, (const struct sockaddr *) &cltaddr, sizeof(cltaddr)) >= 0) {
             sent = 1;
             printf("Sent RESPONSE for file %d to %u:%hu (attempt %d)\n", 
-                  file_idx, cltaddr.sin_addr.s_addr, ntohs(cltaddr.sin_port), i+1);
+                  file_idx, ntohl(cltaddr.sin_addr.s_addr), ntohs(cltaddr.sin_port), i+1);
         } else {
             perror("sendto failed");
             usleep(100000); // 短暂延迟100ms后重试
@@ -437,8 +437,7 @@ struct node* send_return(int sockfd, struct sockaddr_in cltaddr, char file_idx, 
     return current;
 }
 
-
-/* Send finish to the client */
+/* 改进的 send_finish 函数 */
 int send_finish(int sockfd, struct sockaddr_in servaddr, char seq) {
     char buffer[MAXMSG];
     
@@ -462,7 +461,7 @@ int send_finish(int sockfd, struct sockaddr_in servaddr, char seq) {
     buffer[total_len] = '\0';
 
     // 多次尝试发送，确保消息被接收
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 5; i++) {  // 增加重试次数
         if (sendto(sockfd, (const char *)buffer, total_len,
             0, (const struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
             perror("sendto failed in send_finish");
@@ -471,17 +470,16 @@ int send_finish(int sockfd, struct sockaddr_in servaddr, char seq) {
         }
         
         // 短暂延迟，给客户端处理时间
-        usleep(10000); // 10ms
+        usleep(50000); // 增加延迟到50ms
     }
     
     return 0;
 }
 
-
 int check_timeout(long long now, struct rdt3_sender_ctx *ctx_head, int sockfd) {
     struct rdt3_sender_ctx *current = ctx_head;
     int retrans_count = 0;
-    const int MAX_NO_ACK_THRESHOLD = 10; // 定义最大重传次数
+    const int MAX_NO_ACK_THRESHOLD = 20; // 增加最大重传次数
 
     if (current == NULL) {
         return 0;
@@ -491,11 +489,8 @@ int check_timeout(long long now, struct rdt3_sender_ctx *ctx_head, int sockfd) {
         if (current->waiting_ack) {
             // 检查是否超时
             if (now - current->clock > TIMEOUT) {
-                // 记录超时重传次数
-                current->noack_num = (current->noack_num == SEQ0) ? SEQ1 : SEQ0;
-                
-                printf("Timeout detected for node with ip=%u, port=%hu (attempt %d)\n", 
-                       current->ip, current->port, current->clock);
+                printf("Timeout detected for node with ip=%u, port=%hu\n", 
+                       current->ip, current->port);
                 
                 // 创建客户端地址结构
                 struct sockaddr_in cltaddr;
@@ -517,6 +512,8 @@ int check_timeout(long long now, struct rdt3_sender_ctx *ctx_head, int sockfd) {
                 
                 // 更新时间戳
                 current->clock = now;
+                // 切换序列号, 对于 rdt3.0 协议
+                current->noack_num = (current->noack_num == SEQ0) ? SEQ1 : SEQ0;
                 retrans_count++;
             }
         }
@@ -525,7 +522,6 @@ int check_timeout(long long now, struct rdt3_sender_ctx *ctx_head, int sockfd) {
 
     return retrans_count;
 }
-
 // Add a new file descriptor to the set
 void add_to_pfds(struct pollfd *pfds[], int newfd, int *fd_count, int *fd_size)
 {
