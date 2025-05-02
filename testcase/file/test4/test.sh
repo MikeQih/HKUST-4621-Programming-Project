@@ -1,7 +1,8 @@
 #!/bin/bash
 gcc -o test_server server.c -pthread
 
-./test_server > /dev/null 2>&1 &
+# ./test_server > /dev/null 2>&1 &
+./test_server > server_debug.log 2>&1 &
 
 cd ./client1/
 ../client_loss < input.txt > /dev/null 2>&1 &

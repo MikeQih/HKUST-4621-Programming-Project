@@ -1,0 +1,4 @@
+[15:35:08.087] [main:1046] The server is listening on port 8080...
+[15:35:08.089] [chat_server:760] Chat server is listening on port 8080
+[15:35:20.102] [chat_server:985] Chat server thread exiting
+[15:35:20.103] [main:1428] Server shutting down gracefully
