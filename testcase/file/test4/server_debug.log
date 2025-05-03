@@ -1,4 +1,2 @@
-[15:44:10.011] [main:1046] The server is listening on port 8080...
-[15:44:10.012] [chat_server:760] Chat server is listening on port 8080
-[15:44:22.023] [chat_server:985] Chat server thread exiting
-[15:44:22.023] [main:1435] Server shutting down gracefully
+[17:04:48.564] [main:1046] The server is listening on port 5000...
+bind failed: Address already in use

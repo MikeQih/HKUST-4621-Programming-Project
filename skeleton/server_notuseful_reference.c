@@ -12,7 +12,7 @@
 #include <signal.h>
 
 #define SERVER "127.0.0.1"
-#define SERVER_PORT 8080
+#define SERVER_PORT 5000
 
 #define MAXMSG 1400
 #define MAXNAME 20
@@ -1400,7 +1400,7 @@ int main() {
                         
                         current_ctx->waiting_ack = 0;
                     }
-                    
+
                 } else {
                     DEBUG_PRINT("Ignoring ACK with wrong seq: expected %d, got %d", 
                               current_ctx->noack_num, seq);

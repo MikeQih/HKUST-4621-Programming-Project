@@ -10,8 +10,7 @@
 #include <poll.h>
 
 #define SERVER "127.0.0.1"
-// #define SERVER_PORT 5000
-#define SERVER_PORT 8080
+#define SERVER_PORT 5000
 
 #define MAXMSG 1400
 #define MAXNAME 20

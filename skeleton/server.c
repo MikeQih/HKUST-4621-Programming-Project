@@ -9,8 +9,8 @@
 #include <poll.h>
 
 #define SERVER "127.0.0.1"
-// #define SERVER_PORT 5000
-#define SERVER_PORT 8080
+#define SERVER_PORT 5000
+// #define SERVER_PORT 8080
 
 #define MAXMSG 1400
 #define MAXNAME 20
@@ -491,31 +491,29 @@ int check_timeout(long long now, struct rdt3_sender_ctx *ctx_head, int sockfd) {
 		 * START YOUR CODE HERE
 		 **********************************************/
 
+		// In the check_timeout function, modify it to be more aggressive with retransmissions
 		if (current->waiting_ack) {
-            // 检查是否超时
-            if (now - current->clock > TIMEOUT) {
-                // 超时，需要重传
-                printf("Timeout detected for node with ip=%u, port=%hu\n", 
-                       current->ip, current->port);
-                
-                // 重新构造和发送RESPONSE消息
-                struct sockaddr_in cltaddr;
-                memset(&cltaddr, 0, sizeof(cltaddr));
-                cltaddr.sin_family = AF_INET;
-                cltaddr.sin_addr.s_addr = current->ip;
-                cltaddr.sin_port = htons(current->port);
-                
-                // 如果有等待确认的节点，重新发送
-                if (current->noack_node != NULL) {
-                    // 创建和发送RESPONSE消息
-                    send_return(sockfd, cltaddr, current->file_idx, 
-                               current->noack_node, current->noack_num);
-                    
-                    // 更新时间戳
-                    current->clock = now;
-                }
-            }
-        }
+			// Reduce the timeout or make the condition more lenient
+			if (now - current->clock > TIMEOUT/2) {  // Make timeout more aggressive
+				printf("Timeout detected for node with ip=%u, port=%hu\n", 
+					current->ip, current->port);
+				
+				struct sockaddr_in cltaddr;
+				memset(&cltaddr, 0, sizeof(cltaddr));
+				cltaddr.sin_family = AF_INET;
+				cltaddr.sin_addr.s_addr = current->ip;
+				cltaddr.sin_port = htons(current->port);
+				
+				if (current->noack_node != NULL) {
+					// Consider adding a maximum retry count to avoid infinite retransmissions
+					send_return(sockfd, cltaddr, current->file_idx, 
+							current->noack_node, current->noack_num);
+					
+					// Update the timestamp to restart the timeout timer
+					current->clock = now;
+				}
+			}
+		}
 
 		/***********************************************
 		 * END OF YOUR CODE
@@ -603,7 +601,6 @@ void* chat_server(void* arguments) {
 	pfds[0].events = POLLIN;
 	fd_count = 1;
 
-
 	/***********************************************
 	 * END OF YOUR CODE
 	 **********************************************/
@@ -670,9 +667,13 @@ void* chat_server(void* arguments) {
 							 *
 							 * START YOUR CODE HERE
 							 **********************************************/
-
-
-
+							for (int j = 1; j < fd_count; j++) {
+								if (j != i) {
+									if (send(pfds[j].fd, msg, MAXMSG, 0) < 0) {
+										perror("send");
+									}
+								}
+							}
 							/***********************************************
 							 * END OF YOUR CODE
 							 **********************************************/
