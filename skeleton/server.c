@@ -10,6 +10,7 @@
 
 #define SERVER "127.0.0.1"
 #define SERVER_PORT 5000
+// #define SERVER_PORT 8080
 
 #define MAXMSG 1400
 #define MAXNAME 20
@@ -173,7 +174,22 @@ void collect_names_in_chatting(struct node *head, int index, char* names) {
 	 *
 	 * START YOUR CODE HERE
 	 **********************************************/
-
+	struct node *current = head;
+	int idx = 0;
+	while (current != NULL) {
+        // 如果节点启用了聊天功能，并且不是当前用户
+        if ((current->register_flag & CHAT_FLAG) && idx != index) {
+            strcat(names, "'");
+            strcat(names, current->name);
+            strcat(names, "' ");
+			/*
+			对于每个节点，如果用户注册时启用了聊天功能（通过 CHAT_FLAG 标记）且该节点的索引不等于传入的 index（即排除当前用户），
+			则将这个用户的名字追加到字符串 names 中，并用单引号括起来，名字之间用空格分隔。
+			*/
+        }
+        current = current->next;
+        idx++;
+    }
 
 
 	/***********************************************
@@ -190,9 +206,21 @@ int query_idx_flag_by_name(struct node *head, const char* name, int* index, char
 	 *
 	 * START YOUR CODE HERE
 	 **********************************************/
-
-
-
+	struct node *current = head;
+    int idx = 0;
+	while (current != NULL)
+	{
+		if (strcmp(current->name,name) == 0)
+		{
+			*index = idx;
+			*flag = current->register_flag;
+			return 0;
+		}
+		current = current->next;
+		idx++;
+	}
+	return -1;
+	
 	/***********************************************
 	 * END OF YOUR CODE
 	 **********************************************/
@@ -207,8 +235,22 @@ int query_name_flag_by_idx(struct node *head, int index, char* name, char* flag)
 	 *
 	 * START YOUR CODE HERE
 	 **********************************************/
+	struct node *current = head;
+    int idx = 0;
+	while (current != NULL && idx<index)
+	{
+		current = current -> next;
+		idx++;
+	}
 
-
+	if (current == NULL)
+	{
+		return -1;
+	}
+	
+	strcpy(name, current->name); //把 current->name 里的字符串 复制到 name 这个变量中。
+    *flag = current->register_flag;
+    return 0; // 成功
 
 	/***********************************************
 	 * END OF YOUR CODE
@@ -222,14 +264,14 @@ void remove_node(struct node** head, int index) {
         return;
     }
 
-	if (index == 0) {
+	if (index == 0) { //index is 头节点
 		struct node* next = (*head)->next;
 		free(*head);
 		*head = next;
 		return;
 	}
 
-    struct node* prev = *head;
+    struct node* prev = *head; //定义一个指针 prev 指向当前头节点，准备遍历链表找目标节点。
 	struct node* curr = (*head)->next;
 	int idx = 1;
     while (curr != NULL) {
@@ -344,7 +386,20 @@ struct node* send_return(int sockfd, struct sockaddr_in cltaddr, char file_idx, 
 	 * START YOUR CODE HERE
 	 **********************************************/
 
+	 // 从当前节点开始搜索
+	while (current != NULL) {
+		// 检查节点是否启用文件共享且拥有请求的文件
+		if ((current->register_flag & FILE_FLAG) && 
+			(current->file_map & (1U << (31 - file_idx)))) {
+			// 找到匹配的节点，准备发送响应
+			break;
+		}
+		current = current->next;
+    }
 
+	if (current == NULL) {
+        return NULL; // 没有节点有这个文件
+    }
 
 	/***********************************************
 	 * END OF YOUR CODE
@@ -436,7 +491,29 @@ int check_timeout(long long now, struct rdt3_sender_ctx *ctx_head, int sockfd) {
 		 * START YOUR CODE HERE
 		 **********************************************/
 
-
+		// In the check_timeout function, modify it to be more aggressive with retransmissions
+		if (current->waiting_ack) {
+			// Reduce the timeout or make the condition more lenient
+			if (now - current->clock > TIMEOUT/2) {  // Make timeout more aggressive
+				printf("Timeout detected for node with ip=%u, port=%hu\n", 
+					current->ip, current->port);
+				
+				struct sockaddr_in cltaddr;
+				memset(&cltaddr, 0, sizeof(cltaddr));
+				cltaddr.sin_family = AF_INET;
+				cltaddr.sin_addr.s_addr = current->ip;
+				cltaddr.sin_port = htons(current->port);
+				
+				if (current->noack_node != NULL) {
+					// Consider adding a maximum retry count to avoid infinite retransmissions
+					send_return(sockfd, cltaddr, current->file_idx, 
+							current->noack_node, current->noack_num);
+					
+					// Update the timestamp to restart the timeout timer
+					current->clock = now;
+				}
+			}
+		}
 
 		/***********************************************
 		 * END OF YOUR CODE
@@ -493,7 +570,8 @@ void* chat_server(void* arguments) {
 		exit(EXIT_FAILURE);
 	}
 
-	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+	// if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
 		perror("setsockopt error");
 		exit(EXIT_FAILURE);
 	}
@@ -519,8 +597,9 @@ void* chat_server(void* arguments) {
 	 *
 	 * START YOUR CODE HERE
 	 **********************************************/
-
-
+	pfds[0].fd = server_fd;
+	pfds[0].events = POLLIN;
+	fd_count = 1;
 
 	/***********************************************
 	 * END OF YOUR CODE
@@ -542,7 +621,13 @@ void* chat_server(void* arguments) {
 					 *
 					 * START YOUR CODE HERE
 					 **********************************************/
-
+					if ((client_fd = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen))<0)
+					{
+						perror("accept");
+    					continue;
+					}
+					printf("New connection accepted\n");
+					add_to_pfds(&pfds, client_fd, &fd_count, &fd_size);
 
 
 					/***********************************************
@@ -582,9 +667,13 @@ void* chat_server(void* arguments) {
 							 *
 							 * START YOUR CODE HERE
 							 **********************************************/
-
-
-
+							for (int j = 1; j < fd_count; j++) {
+								if (j != i) {
+									if (send(pfds[j].fd, msg, MAXMSG, 0) < 0) {
+										perror("send");
+									}
+								}
+							}
 							/***********************************************
 							 * END OF YOUR CODE
 							 **********************************************/
@@ -621,7 +710,14 @@ void* chat_server(void* arguments) {
 							 * START YOUR CODE HERE
 							 **********************************************/
 
-
+							// 处理@ALL:消息
+							for (int j = 1; j < fd_count; j++) { // 从1开始跳过服务器socket
+								if (j != i) { // 不发给发送者自己
+									if (send(pfds[j].fd, msg, MAXMSG, 0) < 0) {
+										perror("send");
+									}
+								}
+							}
 
 							/***********************************************
 							 * END OF YOUR CODE
@@ -727,7 +823,14 @@ void* chat_server(void* arguments) {
 							 * START YOUR CODE HERE
 							 **********************************************/
 
-
+							// 处理离开和加入消息
+							for (int j = 1; j < fd_count; j++) { // 从1开始跳过服务器socket
+								if (j != i) { // 不发给发送者自己
+									if (send(pfds[j].fd, msg, MAXMSG, 0) < 0) {
+										perror("send");
+									}
+								}
+							}
 
 							/***********************************************
 							 * END OF YOUR CODE
@@ -889,8 +992,22 @@ int main() {
 			 *
 			 * START YOUR CODE HERE
 			 **********************************************/
+			parse_idx += strlen(UPDATE);
+			parse_idx++; /*skip blank */
 
+			memcpy(&dst_ip, buffer + parse_idx, sizeof(dst_ip));
+			parse_idx += sizeof(dst_ip);
 
+			memcpy(&dst_port, buffer + parse_idx, sizeof(dst_port));
+			parse_idx += sizeof(dst_port);
+
+			memcpy(&new_map, buffer + parse_idx, sizeof(new_map));
+			parse_idx += sizeof(new_map);
+
+			memcpy(&updated_flag, buffer + parse_idx, sizeof(updated_flag));
+			parse_idx += sizeof(updated_flag);
+
+			printf("Update '%s' @ (%d %hd) with flag %d\n", "unknown", dst_ip, dst_port, updated_flag);
 
 			/***********************************************
 			 * END OF YOUR CODE
@@ -908,7 +1025,21 @@ int main() {
 				 * START YOUR CODE HERE
 				 **********************************************/
 
-
+				// 更新节点信息
+				update_node->file_map = new_map;
+				update_node->register_flag = updated_flag;
+				printf("Updated node: '%s' with file_map 0x%x and flag %d\n", 
+					update_node->name, update_node->file_map, update_node->register_flag);
+		
+				// 发送ACK包
+				memcpy(send_buf, &seq, sizeof(seq));
+				send_idx += 2; /* seq and blank */
+		
+				memcpy(send_buf + send_idx, ACK, strlen(ACK));
+				send_idx += strlen(ACK);
+		
+				sendto(sockfd, (const char *)send_buf, send_idx,
+					0, (const struct sockaddr *) &clientaddr, sizeof(clientaddr));
 
 				/***********************************************
 				 * END OF YOUR CODE

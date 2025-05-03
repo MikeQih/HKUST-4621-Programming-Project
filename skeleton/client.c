@@ -40,7 +40,7 @@
 #define GOODBYE "GOODBYE"
 
 #define TIMEOUT 500000		/* 1000 ms */
-
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 
 /* This structure can be used to pass arguments */
@@ -86,12 +86,15 @@ int rdt3_send(int sockfd, struct sockaddr_in servaddr, char ack_num, char *buffe
 	int waiting = 1;
 	char noack_num = ack_num;
 	struct sockaddr_in recv_addr;
-	unsigned int recv_len;
+	socklen_t recv_len = sizeof(recv_addr);
+	// unsigned int recv_len;
 	char recv_buf[MAXMSG];
+	int retries = 0;
+    int max_retries = 10;
 
-	char seq;
-	char op[OP_SIZE];
-	char remain[MAXMSG];
+	// char seq;
+	// char op[OP_SIZE];
+	// char remain[MAXMSG];
 
 	sendto(sockfd, (const char *)buffer, len,
 		0, (const struct sockaddr *) &servaddr, sizeof(servaddr));
@@ -101,7 +104,7 @@ int rdt3_send(int sockfd, struct sockaddr_in servaddr, char ack_num, char *buffe
 	int parse_idx = 0;
 	char return_code = 0; // only used for register
 
-	while (waiting) {
+	while (waiting && retries < max_retries) {
 		/***********************************************
 		 * You should receive and parse the response here.
 		 * Then, you should check whether it is the ACK
@@ -113,15 +116,45 @@ int rdt3_send(int sockfd, struct sockaddr_in servaddr, char ack_num, char *buffe
 		 **********************************************/
 
 
+		// 接收回复
+		int n = recvfrom(sockfd, recv_buf, MAXMSG, 0, 
+		(struct sockaddr *)&recv_addr, &recv_len);
+
+		// 如果接收超时或出错，重新发送数据包
+		if (n < 0) {
+			printf("Timeout detected, retransmitting (attempt %d)...\n", retries+1);
+			sendto(sockfd, buffer, len, 0, 
+				(const struct sockaddr *)&servaddr, sizeof(servaddr));
+			retries++;
+			continue;
+		}
+
+		// 确保接收的数据以NULL结尾
+		recv_buf[n] = '\0';
+
+		// 解析序列号和ACK
+        char seq = recv_buf[0];
+        char return_code = recv_buf[1]; // 获取返回码
+
+		// 检查ACK包
+		if (seq == ack_num && strncmp(recv_buf + 2, ACK, strlen(ACK)) == 0) {
+		// 收到了正确的ACK
+			waiting = 0;
+			return (int)return_code;
+		}
 
 		/***********************************************
 		 * END OF YOUR CODE
 		 **********************************************/
-		bzero(recv_buf, MAXMSG);
+		// bzero(recv_buf, MAXMSG);
+
 	}
 
 	unset_timeout(sockfd);
-
+	if (retries >= max_retries) {
+        printf("Maximum retries reached, giving up\n");
+        return -1; // 表示发送失败
+    }
 	return (int)return_code;
 }
 
@@ -191,7 +224,35 @@ int send_update(int sockfd, struct sockaddr_in servaddr, unsigned int ip, unsign
 	 * START YOUR CODE HERE
 	 **********************************************/
 
+	int total_len = 0;
 
+	memcpy(buffer, &seq, sizeof(seq));
+	total_len ++; /* add a seq */
+
+	buffer[total_len] = ' ';
+	total_len ++; /* add a blank */
+
+	memcpy(buffer + total_len, UPDATE, strlen(UPDATE));
+	total_len += strlen(UPDATE);
+
+	buffer[total_len] = ' ';
+	total_len ++; /* add a blank */
+
+	memcpy(buffer + total_len, &ip, sizeof(ip));
+	total_len += sizeof(ip);
+
+	memcpy(buffer + total_len, &port, sizeof(port));
+	total_len += sizeof(port);
+
+	memcpy(buffer + total_len, &file_map, sizeof(file_map));
+	total_len += sizeof(file_map);
+
+	memcpy(buffer + total_len, &updated_flag, sizeof(updated_flag));
+	total_len += sizeof(updated_flag);
+
+	buffer[total_len] = '\0';
+	
+	int return_code = rdt3_send(sockfd, servaddr, seq, buffer, total_len);
 
 	/***********************************************
 	 * END OF YOUR CODE
@@ -406,7 +467,8 @@ void* p2p_server(void* arg) {
     }
 
     // Set socket options
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+    // if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
         perror("setsockopt error");
         exit(EXIT_FAILURE);
     }
@@ -435,7 +497,9 @@ void* p2p_server(void* arg) {
 	 * START YOUR CODE HERE
 	 **********************************************/
 
-
+	pfds[0].fd = server_fd;
+	pfds[0].events = POLLIN;
+	fd_count = 1;
 
 	/***********************************************
 	 * END OF YOUR CODE
@@ -460,8 +524,13 @@ void* p2p_server(void* arg) {
 					 * START YOUR CODE HERE
 					 **********************************************/
 
-
-
+					if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) {
+						perror("accept");
+						continue;
+					}
+					printf("P2P server: new connection accepted\n");
+					add_to_pfds(&pfds, new_socket, &fd_count, &fd_size);
+					
 					/***********************************************
 					 * END OF YOUR CODE
 					 **********************************************/
@@ -498,7 +567,27 @@ void* p2p_server(void* arg) {
 					 * START YOUR CODE HERE
 					 **********************************************/
 
+					printf("File size to send: %ld bytes\n", file_size);
+					if (send(new_socket, &file_size, sizeof(file_size), 0) < 0) {
+						perror("send file size failed");
+						fclose(fp);
+						close(new_socket);
+						del_from_pfds(pfds, i, &fd_count);
+						continue;
+					}
 
+					rewind(fp); // 确保文件指针在开头
+					// 然后分块发送文件内容
+					while ((bytes_read = fread(buffer, 1, MAXMSG, fp)) > 0) {
+						printf("Sending %ld bytes of file data\n", bytes_read);
+						if (send(new_socket, buffer, bytes_read, 0) < 0) {
+							perror("send file content failed");
+							break;
+						}
+						bzero(buffer, MAXMSG);
+					}
+
+					printf("File sent successfully\n");
 
 					/***********************************************
 					 * END OF YOUR CODE
@@ -524,8 +613,10 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
     int sock = 0;
     struct sockaddr_in serv_addr;
     char buffer[MAXMSG] = {0};
-    FILE *fp;
+    FILE *fp = NULL;
     ssize_t bytes_read;
+    int retries = 0;
+    int max_retries = 5;
 
     // Create socket file descriptor
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -540,26 +631,43 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
 
 	printf("Connecting to p2p server ...\n");
 
-    // Connect to server
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        perror("connect error");
-        return -1;
-    }
+	// 连接服务器（带重试）
+    while (retries < max_retries) {
+		if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+            if (retries == max_retries - 1) {
+                perror("connect error after retries");
+                close(sock);
+                return -1;
+            }
+            printf("Connection attempt failed, retrying (%d/%d)...\n", retries+1, max_retries);
+            retries++;
+            sleep(1); // 短暂延迟后重试
+            continue;
+        }
+        break; // 连接成功，跳出循环
+	}
 
-	sleep(5);
+	// 设置接收超时
+    struct timeval tv;
+    tv.tv_sec = 10;  // 10秒超时
+    tv.tv_usec = 0;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv) < 0) {
+        perror("setsockopt SO_RCVTIMEO");
+    }
 
     // Send file name to server
     if (send(sock, file_name, strlen(file_name), 0) < 0) {
         perror("send file name error");
+		close(sock);
         return -1;
     }
 
-    // Receive file contents from server
-    fp = fopen(file_name, "wb");
-    if (fp == NULL) {
-        perror("fopen file error");
-        return -1;
-    }
+    // // Receive file contents from server
+    // fp = fopen(file_name, "wb");
+    // if (fp == NULL) {
+    //     perror("fopen file error");
+    //     return -1;
+    // }
 
 	/***********************************************
 	 * Refer to the description of file transfer
@@ -568,15 +676,67 @@ int p2p_client(unsigned int ip, unsigned short port, char *file_name) {
 	 * START YOUR CODE HERE
 	 **********************************************/
 
+	// 接收文件大小
+	long file_size;
+	if (recv(sock, &file_size, sizeof(file_size), 0) < 0) {
+		perror("recv file size failed");
+		close(sock);
+		return -1;
+	}
 
+	printf("File size to receive: %ld bytes\n", file_size);
+
+	// 接收并写入文件内容
+	if (file_size > 0) {
+		fp = fopen(file_name, "wb");
+		if (fp == NULL) {
+			perror("fopen file error");
+			close(sock);
+			return -1;
+		}
+
+		long total_received = 0;
+		while (total_received < file_size) {
+			bzero(buffer, MAXMSG);
+			bytes_read = recv(sock, buffer, MIN(MAXMSG, file_size - total_received), 0);
+			
+			if (bytes_read <= 0) {
+				if (bytes_read == 0)
+					printf("Connection closed by peer\n");
+				else
+					perror("recv file content failed");
+				break;
+			}
+			
+			printf("Received %ld bytes of file data\n", bytes_read);
+            size_t written = fwrite(buffer, 1, bytes_read, fp);
+            if (written != bytes_read) {
+                printf("Warning: Only wrote %ld of %ld bytes\n", written, bytes_read);
+            }
+            total_received += bytes_read;
+		}
+		
+		if (total_received == file_size) {
+            printf("File received: %ld of %ld bytes\n", total_received, file_size);
+            fclose(fp);
+        } else {
+            printf("Incomplete file transfer: %ld of %ld bytes\n", total_received, file_size);
+            fclose(fp);
+            // 删除不完整的文件
+            remove(file_name);
+            close(sock);
+            return -1;
+        }
+
+	} else {
+		printf("No file content to receive (file size is 0)\n");
+	}
 
 	/***********************************************
 	 * END OF YOUR CODE
 	 **********************************************/
 
 	printf("Receive finished !\n");
-
-    fclose(fp);
     close(sock);
     return 0;
 }
@@ -640,8 +800,12 @@ int main() {
 	 * START YOUR CODE HERE
 	 **********************************************/
 
-
-
+	if (pthread_create(&tid, NULL, p2p_server, (void*)&arg) != 0) {
+		perror("pthread_create failed");
+		exit(EXIT_FAILURE);
+	}
+	printf("P2P server thread created successfully\n");
+	 
 	/***********************************************
 	 * END OF YOUR CODE
 	 **********************************************/
@@ -792,7 +956,13 @@ int main() {
 			memcpy(msg, command + parse_idx + 1, MAXMSG - parse_idx - 1);
 			memcpy(buffer, AT, sizeof(AT));
 			memcpy(buffer + sizeof(AT), name, sizeof(name));
-			memcpy(buffer + sizeof(AT) + sizeof(name), msg, sizeof(msg));
+
+			// memcpy(buffer + sizeof(AT) + sizeof(name), msg, sizeof(msg));
+
+			// 在AT命令处理中 Fix缓冲区溢出问题
+			int msg_size = MIN(sizeof(msg), MAXMSG - sizeof(AT) - sizeof(name));
+			memcpy(buffer + sizeof(AT) + sizeof(name), msg, msg_size);
+
 			if (send(chat_sockfd, buffer, sizeof(buffer), 0) < 0) {
 				perror("AT failed");
 			}
